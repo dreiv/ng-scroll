@@ -1,0 +1,23 @@
+language: node_js
+
+node_js:
+   - node # will use latest node
+
+branches: # branches to watch for changes
+  only:
+    - master
+
+cache: # things to cache
+  directories:
+    - node_modules
+
+script: # the build step
+  - npm run build:ci
+
+deploy: # deploying the application
+  provider: pages
+  skip_cleanup: true
+  github_token: $GITHUB_TOKEN
+  local_dir: dist
+  on:
+    branch: master
