@@ -1,14 +1,21 @@
 import { Injectable, NgZone } from '@angular/core';
-import { Subject } from 'rxjs/Subject';
 import { Observable } from 'rxjs/Observable';
+import { Subject } from 'rxjs/Subject';
+import { Subscriber } from 'rxjs/Subscriber';
 import { Subscription } from 'rxjs/Subscription';
 import { fromEvent } from 'rxjs/observable/fromEvent';
 import { auditTime } from 'rxjs/operators';
+import 'rxjs/add/operator/distinctUntilChanged';
+import 'rxjs/add/operator/share';
+import { isIOS } from './utils';
+
+export enum ScrollDirection {
+    UP = 'up',
+    DOWN = 'down'
+}
 
 /** Time in ms to throttle the scrolling events by default. */
 export const DEFAULT_SCROLL_TIME = 20;
-
-const previousPosition: number = -1;
 
 @Injectable()
 export class ScrollService {
@@ -16,11 +23,13 @@ export class ScrollService {
   globalSubscription: Subscription | null;
 
   /** Subject for notifying that a registered scrollable reference element has been scrolled. */
-  private _scrolled = new Subject<void>();
+  public scrolled: Subject<Element> = new Subject<Element>();
+  private previousScrollTop = 0;
+  private previousScrollingElementWidth: number;
 
   constructor(private ngZone: NgZone) {}
 
-  scrolled$(auditTimeInMs: number = DEFAULT_SCROLL_TIME): Observable<string> {
+  direction$(auditTimeInMs: number = DEFAULT_SCROLL_TIME): Observable<ScrollDirection> {
     return Observable.create(observer => {
       if (!this.globalSubscription) {
         this.addGlobalListener();
@@ -28,25 +37,51 @@ export class ScrollService {
 
       // In the case of a 0ms delay, use an observable without auditTime
       // since it does add a perceptible delay in processing overhead.
-      const subscription = auditTimeInMs > 0
-        ? this._scrolled.pipe(auditTime(auditTimeInMs)).subscribe(() => {
-              this.ngZone.run(() => {
-                  observer.next(`${document.scrollingElement.scrollTop}`);
+      if (auditTimeInMs > 0) {
+          this.scrolled.pipe(auditTime(auditTimeInMs))
+              .subscribe((scrollingElement: HTMLElement) => {
+                  this.resolveDirection(observer, scrollingElement);
               });
-          })
-        : this._scrolled.subscribe(observer);
-    });
+      } else {
+          this.scrolled
+              .subscribe((scrollingElement: HTMLElement) => {
+                  this.resolveDirection(observer, scrollingElement);
+              });
+      }
+    }).distinctUntilChanged()
+      .share();
+  }
+
+  private resolveDirection(observer: Subscriber<ScrollDirection>, scrollingElement: HTMLElement) {
+    const scrollingElementWidth = scrollingElement.clientWidth;
+
+    if (this.previousScrollingElementWidth === scrollingElementWidth) {
+      const currentScrollTop = isIOS()
+        ? Math.max(Math.min(scrollingElement.scrollTop, scrollingElement.scrollHeight - window.innerHeight), 0)
+        : scrollingElement.scrollTop;
+
+      if (currentScrollTop !== this.previousScrollTop) {
+        const direction: ScrollDirection = currentScrollTop > this.previousScrollTop
+          ? ScrollDirection.DOWN
+          : ScrollDirection.UP;
+
+        this.previousScrollTop = currentScrollTop;
+
+        this.ngZone.run(() => {
+          observer.next(direction);
+        });
+      }
+    }
+
+    this.previousScrollingElementWidth = scrollingElementWidth;
   }
 
   /** Sets up the global scroll listener. */
   private addGlobalListener() {
     this.globalSubscription = this.ngZone.runOutsideAngular(() => {
       return fromEvent(window.document, 'scroll', { passive: true })
-        .subscribe((event: any) => {
-          const el = event.currentTarget.scrollingElement;
-
-          this._scrolled.next();
-          console.log('top: ', el.scrollTop);
+        .subscribe((event: UIEvent) => {
+          this.scrolled.next((event.currentTarget as HTMLDocument).scrollingElement);
         });
     });
   }
