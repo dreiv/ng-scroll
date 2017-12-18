@@ -22,10 +22,11 @@ export class ScrollService {
   /** Subject for notifying that a registered scrollable reference element has been scrolled. */
   private scrolled$: Subject<Element> = new Subject<Element>();
   /** Subject for notifying that a registered scrollable reference element has been resized. */
-  private resized$: Subject<Element> = new Subject<Element>();
+  private resized$: Subject<void> = new Subject<void>();
 
   private previousScrollTop: number;
   private previousOffsetHeight: number;
+  private ignoreNextEvent = false;
 
   constructor(private ngZone: NgZone) {
     this.addGlobalListeners();
@@ -33,7 +34,7 @@ export class ScrollService {
 
   direction$(auditTimeInMs: number = DEFAULT_SCROLL_TIME): Observable<ScrollDirection> {
     return Observable.create(observer => {
-      this.resized$.subscribe((scrollingElement: HTMLElement) => this.previousScrollTop = scrollingElement.scrollTop);
+      this.resized$.subscribe(() => this.ignoreNextEvent = true);
 
       // In the case of a 0ms delay, use an observable without auditTime
       // since it does add a perceptible delay in processing overhead.
@@ -43,12 +44,13 @@ export class ScrollService {
 
       scrolledSubscription.subscribe((scrollingElement: HTMLElement) => {
         const currentScrollTop = isIOS()
-          // Eliminate IOs over scrolling by constraining scroll value range.
+          // Eliminate IOs over scrolling by constraining the scroll value range.
           ? Math.max(Math.min(scrollingElement.scrollTop, scrollingElement.scrollHeight - window.innerHeight), 0)
           : scrollingElement.scrollTop;
         const offsetHeight = scrollingElement.offsetHeight;
 
-        if (offsetHeight === this.previousOffsetHeight
+        if (!this.ignoreNextEvent
+              && offsetHeight === this.previousOffsetHeight
               && currentScrollTop !== this.previousScrollTop) {
           const direction: ScrollDirection = currentScrollTop > this.previousScrollTop
             ? ScrollDirection.DOWN
@@ -61,6 +63,7 @@ export class ScrollService {
 
         this.previousScrollTop = currentScrollTop;
         this.previousOffsetHeight = offsetHeight;
+        this.ignoreNextEvent = false;
       });
 
     }).distinctUntilChanged()
@@ -76,7 +79,7 @@ export class ScrollService {
       merge(
         fromEvent(window, 'resize', { passive: true }),
         fromEvent(window, 'orientationchange', { passive: true })
-      ).subscribe(() => this.resized$.next(document.scrollingElement));
+      ).subscribe(() => this.resized$.next());
     });
   }
 }
