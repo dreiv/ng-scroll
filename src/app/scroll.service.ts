@@ -14,63 +14,70 @@ export enum ScrollDirection {
     DOWN = 'down'
 }
 
+export interface ScrollEvent {
+  direction: ScrollDirection;
+  position: number;
+}
+
 /** Time in ms to throttle the scrolling events by default. */
 export const DEFAULT_SCROLL_TIME = 20;
 
 @Injectable()
 export class ScrollService {
   /** Subject for notifying that a registered scrollable reference element has been scrolled. */
-  private scrolled$: Subject<Element> = new Subject<Element>();
+  private _scrolled$: Subject<Element> = new Subject<Element>();
 
   private previousScrollTop: number;
-  private previousOffsetHeight: number;
+  private previousScrollHeight: number;
 
   constructor(private ngZone: NgZone) {
     this.addGlobalListener();
   }
 
-  direction$(auditTimeInMs: number = DEFAULT_SCROLL_TIME): Observable<ScrollDirection> {
-    return Observable.create(observer => {
+  scrolled$(auditTimeInMs: number = DEFAULT_SCROLL_TIME): Observable<ScrollEvent> {
+    return Observable.create( observer => {
 
       // In the case of a 0ms delay, use an observable without auditTime
       // since it does add a perceptible delay in processing overhead.
       const scrolledSubscription: Observable<Element> = auditTimeInMs > 0
-        ? this.scrolled$.pipe(auditTime(auditTimeInMs))
-        : this.scrolled$;
+        ? this._scrolled$.pipe(auditTime(auditTimeInMs))
+        : this._scrolled$;
 
       scrolledSubscription
         .filter((scrollingElement: HTMLElement) => scrollingElement.scrollHeight > scrollingElement.clientHeight)
         .subscribe((scrollingElement: HTMLElement) => {
-          if ( scrollingElement.offsetHeight === this.previousOffsetHeight ) {
-            const currentScrollTop = isIOS()
+          const scrollHeight = scrollingElement.scrollHeight;
+
+          if ( scrollHeight === this.previousScrollHeight ) {
+            const scrollTop = isIOS()
               // Eliminate IOs over scrolling by constraining the scroll value range.
-              ? Math.max(Math.min(scrollingElement.scrollTop, scrollingElement.scrollHeight - window.innerHeight), 0)
+              ? Math.max(Math.min(scrollingElement.scrollTop, scrollHeight - window.innerHeight), 0)
               : scrollingElement.scrollTop;
 
-            if ( this.previousScrollTop && currentScrollTop !== this.previousScrollTop ) {
-              const direction: ScrollDirection = currentScrollTop > this.previousScrollTop
+            if ( this.previousScrollTop && scrollTop !== this.previousScrollTop ) {
+              const direction: ScrollDirection = scrollTop > this.previousScrollTop
                 ? ScrollDirection.DOWN
                 : ScrollDirection.UP;
 
               this.ngZone.run(() => {
-                observer.next(direction);
+                observer.next({
+                  direction: direction,
+                  position: scrollTop
+                });
               });
             }
-
-            this.previousScrollTop = currentScrollTop;
+            this.previousScrollTop = scrollTop;
           }
-
-          this.previousOffsetHeight = scrollingElement.offsetHeight;
+          this.previousScrollHeight = scrollHeight;
       });
-    }).distinctUntilChanged()
-      .share();
+    }).share();
   }
 
   /** Sets up the global scroll listener. */
   private addGlobalListener() {
     this.ngZone.runOutsideAngular(() => {
       fromEvent(window.document, 'scroll', { passive: true })
-        .subscribe(() => this.scrolled$.next(document.scrollingElement));
+        .subscribe(() => this._scrolled$.next(document.scrollingElement));
     });
   }
 }
